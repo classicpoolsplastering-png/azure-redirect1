@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Turnstile Test</title>
+  <script src="https://challenges.cloudflare.com/turnstile/v0/api.js?onload=onloadTurnstileCallback" async defer></script>
+</head>
+<body style="font-family:sans-serif;padding:40px">
+  <h2>Turnstile sitekey test</h2>
+  <div id="cf-turnstile"></div>
+  <p id="result" style="font-weight:bold;font-size:18px"></p>
+  <script>
+    function onloadTurnstileCallback() {
+      turnstile.render('#cf-turnstile', {
+        sitekey: '0x4AAAAAAAE_5TQtgYRv9FjNQ',
+        callback: function(token) {
+          document.getElementById('result').textContent = '✅ Sitekey WORKS — token length: ' + token.length;
+        },
+        'error-callback': function(code) {
+          document.getElementById('result').textContent = '❌ ERROR: ' + code;
+        }
+      });
+    }
+  </script>
+</body>
+</html>
