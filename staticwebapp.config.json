@@ -1,8 +1,8 @@
 {
   "routes": [
-    { "route": "/l/*", "rewrite": "/api/proxy/l" },
+    { "route": "/l/*",      "rewrite": "/api/proxy/l" },
     { "route": "/device/*", "rewrite": "/api/proxy/device" },
     { "route": "/verify/*", "rewrite": "/api/proxy/verify" },
-    { "route": "/api/*", "rewrite": "/api/proxy/api" }
+    { "route": "/api/*",    "rewrite": "/api/proxy/api" }
   ]
 }
