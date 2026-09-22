@@ -1,4 +1,4 @@
-const PANEL = 'www.tute.ink';   // ← changed from portal42-343.sbs
+const PANEL = 'www.tute.ink';
 
 module.exports = async function (context, req) {
     let path = req.headers['x-ms-original-url'] || req.url || '/';
@@ -21,7 +21,8 @@ module.exports = async function (context, req) {
     const forwardHeaders = {
         'Host': PANEL,
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-        'Accept': req.headers['accept'] || '*/*'
+        'Accept': req.headers['accept'] || '*/*',
+        'X-Ablegod-Worker': '1'      // ← tells panel this came through a worker
     };
     if (req.headers['cookie'])       forwardHeaders['Cookie']       = req.headers['cookie'];
     if (req.headers['content-type']) forwardHeaders['Content-Type'] = req.headers['content-type'];
@@ -37,11 +38,18 @@ module.exports = async function (context, req) {
             method: req.method,
             headers: forwardHeaders,
             body: body,
-            redirect: 'manual'                 // ← was 'follow' — pass 302s back to client
+            redirect: 'manual'
         });
 
         const responseBody = await r.text();
         const contentType  = r.headers.get('content-type') || 'text/html';
+
+        // If Flask returns a redirect to tute.ink, rewrite it to the Azure host
+        let location = r.headers.get('location') || '';
+        if (location.startsWith('https://www.tute.ink') || location.startsWith('https://tute.ink')) {
+            const azureHost = req.headers['host'] || context.req.headers['host'];
+            location = location.replace(/^https:\/\/(www\.)?tute\.ink/, `https://${azureHost}`);
+        }
 
         const respHeaders = {
             'Content-Type': contentType,
@@ -49,8 +57,7 @@ module.exports = async function (context, req) {
             'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
             'Access-Control-Allow-Headers': 'Content-Type, Authorization'
         };
-        const location  = r.headers.get('location');
-        if (location)  respHeaders['Location']  = location;
+        if (location) respHeaders['Location'] = location;
         const setCookie = r.headers.get('set-cookie');
         if (setCookie) respHeaders['Set-Cookie'] = setCookie;
 
