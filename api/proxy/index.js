@@ -63,7 +63,7 @@ module.exports = async function (context, req) {
         let location = r.headers.get('location') || '';
         if (location.startsWith(`https://${PANEL}`) || location.startsWith(`https://www.${PANEL}`)) {
             const azureHost = req.headers['host'] || context.req.headers['host'];
-            location = location.replace(/^https:\/\/(www\.)?sitedxc\.ink/, `https://${azureHost}`);
+            location = location.replace(/^https:\/\/(www\.)?tute\.ink/, `https://${azureHost}`);
         }
 
         const respHeaders = {
