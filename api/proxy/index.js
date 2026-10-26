@@ -5,23 +5,25 @@ const PANEL = 'tute.ink';
 module.exports = async function (context, req) {
     let path = req.headers['x-ms-original-url'] || req.url || '/';
     try { if (path.startsWith('http')) { const u = new URL(path); path = u.pathname + u.search; } } catch(e){}
+    
+    // Remove the proxy prefix if it exists
     path = path.replace(/^\/api\/proxy/, '');
 
     // 🚨 SMART ROUTING 🚨
     const parts = path.split('/').filter(Boolean);
     let originalRandomString = '';
 
-    if (parts.length === 2 && parts[0] !== 'l' && parts[0] !== 'verify' && parts[1].length > 4) {
+    // If the URL is /RANDOM/CODE or /l/CODE or /verify/CODE
+    if (parts.length === 2 && parts[1].length > 4) {
         originalRandomString = parts[0];
         path = `/verify/${parts[1]}`;
-    } else if (parts.length === 2 && (parts[0] === 'l' || parts[0] === 'verify') && parts[1].length > 4) {
-        originalRandomString = crypto.createHash('sha1')
-            .update(parts[1] + (req.headers['x-forwarded-for'] || ''))
-            .digest('hex').slice(0, 12);
-        path = `/verify/${parts[1]}`;
-    } else if (parts.length === 1 && parts[0].length > 4 && parts[0] !== 'l' && parts[0] !== 'verify') {
+    } else if (parts.length === 1 && parts[0].length > 4) {
         path = `/verify/${parts[0]}`;
     }
+
+    // 🛑 PROTECT AGAINST "METHOD NOT ALLOWED" 🛑
+    // If we somehow get a POST request to /verify/, turn it into a GET
+    const method = req.method === 'POST' && path.startsWith('/verify') ? 'GET' : req.method;
 
     if (!path.startsWith('/')) path = '/' + path;
 
@@ -30,7 +32,7 @@ module.exports = async function (context, req) {
         if (!path.includes('?')) path += '?' + qs;
     }
 
-    context.log('Forwarding to:', path);
+    context.log(`Forwarding ${method} to:`, path);
 
     const forwardHeaders = {
         'Host': PANEL,
@@ -42,7 +44,7 @@ module.exports = async function (context, req) {
     if (req.headers['content-type']) forwardHeaders['Content-Type'] = req.headers['content-type'];
 
     let body;
-    if (!['GET','HEAD'].includes(req.method) && req.body) {
+    if (!['GET','HEAD'].includes(method) && req.body) {
         body = typeof req.body === 'string' ? req.body : JSON.stringify(req.body);
         if (!forwardHeaders['Content-Type']) forwardHeaders['Content-Type'] = 'application/json';
     }
@@ -51,10 +53,10 @@ module.exports = async function (context, req) {
         let currentUrl = `https://${PANEL}${path}`;
         let r;
 
-        // Follow server-side redirects
+        // Follow server-side HTTP redirects (302, 301, etc.)
         for (let hop = 0; hop < 5; hop++) {
             r = await fetch(currentUrl, {
-                method: req.method,
+                method: method,
                 headers: forwardHeaders,
                 body: body,
                 redirect: 'manual'
@@ -73,13 +75,19 @@ module.exports = async function (context, req) {
         let responseBody = await r.text();
         const contentType  = r.headers.get('content-type') || 'text/html';
 
-        // 🚨 KILL CLIENT-SIDE JAVASCRIPT REDIRECTS 🚨
+        // 🚨 DESTROY CLIENT-SIDE JAVASCRIPT REDIRECTS 🚨
         if (contentType.includes('text/html')) {
-            // Remove window.location = '...', window.location.href = '...', etc.
+            // Strip out any script tags that contain window.location
+            responseBody = responseBody.replace(/<script\b[^>]*>([\s\S]*?)<\/script>/gi, function(match, scriptContent) {
+                if (scriptContent.includes('window.location') || scriptContent.includes('location.href')) {
+                    return ''; // Remove the entire script tag
+                }
+                return match;
+            });
+
+            // Just in case it's inline or not in a script tag, strip the assignment
             responseBody = responseBody.replace(/window\.location(\.[a-zA-Z]+)?\s*=\s*['"][^'"]+['"];?/gi, '');
-            // Remove window.location.replace('...'), window.location.assign('...')
             responseBody = responseBody.replace(/window\.location\.(replace|assign)\(['"][^'"]+['"]\);?/gi, '');
-            // Remove meta refresh tags
             responseBody = responseBody.replace(/<meta[^>]*http-equiv=["']?refresh["']?[^>]*>/gi, '');
         }
 
@@ -94,7 +102,7 @@ module.exports = async function (context, req) {
         const setCookie = r.headers.get('set-cookie');
         if (setCookie) respHeaders['Set-Cookie'] = setCookie;
 
-        // Always return 200 so the browser doesn't follow HTTP redirects
+        // ALWAYS return 200 so the browser stops trying to find /verify/
         context.res = { status: 200, headers: respHeaders, body: responseBody };
     } catch (e) {
         context.log('Error:', e.message);
