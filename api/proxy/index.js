@@ -16,13 +16,13 @@ module.exports = async function (context, req) {
         return;
     }
 
-    context.log('Forwarding to:', path);
+    context.log(`Forwarding ${req.method} to: ${path}`);
 
     const forwardHeaders = {
         'Host': PANEL,
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
         'Accept': req.headers['accept'] || '*/*',
-        'X-Ablegod-Worker': '1'      // CRITICAL: Tells panel to show CAPTCHA
+        'X-Ablegod-Worker': '1'
     };
     if (req.headers['cookie'])       forwardHeaders['Cookie']       = req.headers['cookie'];
     if (req.headers['content-type']) forwardHeaders['Content-Type'] = req.headers['content-type'];
@@ -44,7 +44,6 @@ module.exports = async function (context, req) {
         const responseBody = await r.text();
         const contentType  = r.headers.get('content-type') || 'text/html';
 
-        // Rewrite Flask redirect (tute.ink -> Azure host)
         let location = r.headers.get('location') || '';
         if (location.startsWith('https://www.tute.ink') || location.startsWith('https://tute.ink')) {
             const azureHost = req.headers['host'] || context.req.headers['host'];
