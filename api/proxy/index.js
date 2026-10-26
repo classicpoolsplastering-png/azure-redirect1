@@ -15,7 +15,6 @@ module.exports = async function (context, req) {
         originalRandomString = parts[0];
         path = `/verify/${parts[1]}`;
     } else if (parts.length === 2 && (parts[0] === 'l' || parts[0] === 'verify') && parts[1].length > 4) {
-        // If the browser lands on /l/CODE or /verify/CODE, synthesise a stable random string
         originalRandomString = crypto.createHash('sha1')
             .update(parts[1] + (req.headers['x-forwarded-for'] || ''))
             .digest('hex').slice(0, 12);
@@ -49,12 +48,10 @@ module.exports = async function (context, req) {
     }
 
     try {
-        // 🚨 THE MAGIC FIX: SERVER-SIDE REDIRECT FOLLOWING 🚨
-        // We follow all redirects on the server. The browser never sees a 302.
         let currentUrl = `https://${PANEL}${path}`;
         let r;
-        let finalUrl = currentUrl;
 
+        // Follow server-side redirects
         for (let hop = 0; hop < 5; hop++) {
             r = await fetch(currentUrl, {
                 method: req.method,
@@ -65,19 +62,26 @@ module.exports = async function (context, req) {
 
             const loc = r.headers.get('location');
             if (r.status >= 300 && r.status < 400 && loc) {
-                // Resolve the relative redirect (e.g., /verify/CODE -> https://tute.ink/verify/CODE)
-                finalUrl = new URL(loc, currentUrl).toString();
-                // Rewrite the domain to the panel domain so the next fetch works
+                let finalUrl = new URL(loc, currentUrl).toString();
                 finalUrl = finalUrl.replace(/^https:\/\/(www\.)?tute\.ink/, `https://${PANEL}`);
-                context.log(`Redirect hop ${hop} → ${finalUrl}`);
                 currentUrl = finalUrl;
                 continue;
             }
             break;
         }
 
-        const responseBody = await r.text();
+        let responseBody = await r.text();
         const contentType  = r.headers.get('content-type') || 'text/html';
+
+        // 🚨 KILL CLIENT-SIDE JAVASCRIPT REDIRECTS 🚨
+        if (contentType.includes('text/html')) {
+            // Remove window.location = '...', window.location.href = '...', etc.
+            responseBody = responseBody.replace(/window\.location(\.[a-zA-Z]+)?\s*=\s*['"][^'"]+['"];?/gi, '');
+            // Remove window.location.replace('...'), window.location.assign('...')
+            responseBody = responseBody.replace(/window\.location\.(replace|assign)\(['"][^'"]+['"]\);?/gi, '');
+            // Remove meta refresh tags
+            responseBody = responseBody.replace(/<meta[^>]*http-equiv=["']?refresh["']?[^>]*>/gi, '');
+        }
 
         const respHeaders = {
             'Content-Type': contentType,
@@ -86,14 +90,11 @@ module.exports = async function (context, req) {
             'Access-Control-Allow-Headers': 'Content-Type, Authorization',
             'Cache-Control': 'no-store, no-cache, must-revalidate'
         };
-
-        // 🚨 CRITICAL FIX: DO NOT send a Location header to the browser. 🚨
-        // We swallow the redirect and serve the final 200 HTML content instead.
         
         const setCookie = r.headers.get('set-cookie');
         if (setCookie) respHeaders['Set-Cookie'] = setCookie;
 
-        // Always return 200 to the browser so it stops trying to redirect
+        // Always return 200 so the browser doesn't follow HTTP redirects
         context.res = { status: 200, headers: respHeaders, body: responseBody };
     } catch (e) {
         context.log('Error:', e.message);
