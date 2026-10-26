@@ -1,13 +1,9 @@
 {
   "navigationFallback": {
     "rewrite": "/api/proxy",
-    "exclude": ["/images/*.{png,jpg,gif}", "/css/*", "/js/*", "*.{css,scss,js,png,gif,ico,jpg,svg}", "/api/*"]
+    "exclude": ["/images/*.{png,jpg,gif}", "/css/*", "/js/*", "*.{css,scss,js,png,gif,ico,jpg,svg}"]
   },
   "routes": [
-    {
-      "route": "/api/*",
-      "allowedRoles": ["anonymous"]
-    },
     {
       "route": "/*",
       "serve": "/api/proxy"
