@@ -11,7 +11,7 @@ module.exports = async function (context, req) {
     const parts = path.split('/').filter(Boolean);
     let code = '';
 
-    // Extract the code from the query string (the form submission) or the URL path
+    // Grab the code from the query string (our new fetch method) or the URL path
     if (req.query && req.query.code) {
         code = req.query.code;
     } else if (parts.length >= 2 && parts[1].length > 4) {
@@ -46,7 +46,7 @@ module.exports = async function (context, req) {
     try {
         let r;
 
-        // 🚨 STEP 4: FOLLOW REDIRECTS SERVER-SIDE 🚨
+        // Follow the panel's POST redirect server-side
         for (let hop = 0; hop < 5; hop++) {
             r = await fetch(currentUrl, {
                 method: req.method,
@@ -56,13 +56,11 @@ module.exports = async function (context, req) {
             });
 
             const loc = r.headers.get('location');
-            // If the panel says "Redirect to /verify/CODE", we catch it and fetch the final page here!
             if (r.status >= 300 && r.status < 400 && loc) {
                 let finalUrl = new URL(loc, currentUrl).toString();
                 finalUrl = finalUrl.replace(/^https:\/\/(www\.)?tute\.ink/, `https://${PANEL}`);
-                context.log(`Server-side Redirect hop ${hop} → ${finalUrl}`);
                 currentUrl = finalUrl;
-                continue; // Do the fetch again for the final page
+                continue;
             }
             break;
         }
@@ -70,7 +68,7 @@ module.exports = async function (context, req) {
         let responseBody = await r.text();
         const contentType  = r.headers.get('content-type') || 'text/html';
 
-        // Strip any lingering JS redirects just in case
+        // Strip any lingering JS redirects
         if (contentType.includes('text/html')) {
             responseBody = responseBody.replace(/<script\b[^>]*>([\s\S]*?)<\/script>/gi, function(match, scriptContent) {
                 if (scriptContent.includes('window.location') || scriptContent.includes('location.href')) {
