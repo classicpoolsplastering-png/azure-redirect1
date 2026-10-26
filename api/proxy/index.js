@@ -1,4 +1,4 @@
-const PANEL = 'tute.ink';
+const PANEL = 'www.tute.ink';
 
 module.exports = async function (context, req) {
     let path = req.headers['x-ms-original-url'] || req.url || '/';
@@ -22,7 +22,7 @@ module.exports = async function (context, req) {
         'Host': PANEL,
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
         'Accept': req.headers['accept'] || '*/*',
-        'X-Ablegod-Worker': '1'
+        'X-Ablegod-Worker': '1'      // ← tells panel this came through a worker
     };
     if (req.headers['cookie'])       forwardHeaders['Cookie']       = req.headers['cookie'];
     if (req.headers['content-type']) forwardHeaders['Content-Type'] = req.headers['content-type'];
