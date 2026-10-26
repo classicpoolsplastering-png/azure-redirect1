@@ -46,7 +46,7 @@ module.exports = async function (context, req) {
         let currentUrl = `https://${PANEL}${path}`;
         let r;
 
-        // Follow redirects (e.g., to /l/CODE)
+        // Follow redirects (Flask 302 to /l/CODE)
         for (let hop = 0; hop < 5; hop++) {
             r = await fetch(currentUrl, {
                 method: req.method,
