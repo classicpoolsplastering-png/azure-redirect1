@@ -70,14 +70,6 @@ module.exports = async function (context, req) {
         let responseBody = await r.text();
         const contentType  = r.headers.get('content-type') || 'text/html';
 
-        // If we are getting the CAPTCHA page, rewrite the form action to hit the proxy properly
-        if (responseBody.includes('I\'m not a robot')) {
-            responseBody = responseBody.replace(
-                /<form action=".*?" method="POST"/,
-                '<form action="/" method="POST"'
-            );
-        }
-
         const respHeaders = {
             'Content-Type': contentType,
             'Access-Control-Allow-Origin': '*',
