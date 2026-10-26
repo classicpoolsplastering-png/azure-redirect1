@@ -10,6 +10,7 @@ module.exports = async function (context, req) {
     const parts = path.split('/').filter(Boolean);
     let code = '';
 
+    // Extract code from POST body (from fetch), query, or URL
     if (req.body && req.body.code) {
         code = req.body.code;
     } else if (req.query && req.query.code) {
@@ -45,6 +46,7 @@ module.exports = async function (context, req) {
         let currentUrl = `https://${PANEL}${path}`;
         let r;
 
+        // Follow redirects (Flask 302 to /l/CODE)
         for (let hop = 0; hop < 5; hop++) {
             r = await fetch(currentUrl, {
                 method: req.method,
