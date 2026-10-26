@@ -5,8 +5,12 @@
   },
   "routes": [
     {
-      "route": "/*",
+      "route": "/api/*",
       "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+      "allowedRoles": ["anonymous"]
+    },
+    {
+      "route": "/*",
       "serve": "/api/proxy"
     }
   ]
