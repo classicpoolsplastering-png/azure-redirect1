@@ -4,23 +4,22 @@ module.exports = async function (context, req) {
     let path = req.headers['x-ms-original-url'] || req.url || '/';
     try { if (path.startsWith('http')) { const u = new URL(path); path = u.pathname + u.search; } } catch(e){}
     
-    // Remove /api/proxy prefix if it exists
     path = path.replace(/^\/api\/proxy/, '') || '/';
     if (!path.startsWith('/')) path = '/' + path;
 
-    // Extract code from URL or POST body
+    // Extract code from the POST body (because the form submits to /)
     let code = '';
-    if (req.query && req.query.code) {
-        code = req.query.code;
-    } else if (req.body && req.body.code) {
+    if (req.body && req.body.code) {
         code = req.body.code;
+    } else if (req.query && req.query.code) {
+        code = req.query.code;
     } else {
+        // Fallback for GET requests (like the initial page load)
         const parts = path.split('/').filter(Boolean);
         if (parts.length >= 2) code = parts[1];
         else if (parts.length === 1) code = parts[0];
     }
 
-    // If we found a code, target the panel's verify endpoint
     if (code) {
         path = `/verify/${code}`;
     }
@@ -51,7 +50,7 @@ module.exports = async function (context, req) {
         let currentUrl = `https://${PANEL}${path}`;
         let r;
 
-        // Follow server-side redirects (Flask 302 to /l/CODE)
+        // Follow the 302 redirect to /l/CODE
         for (let hop = 0; hop < 5; hop++) {
             r = await fetch(currentUrl, {
                 method: req.method,
@@ -64,7 +63,6 @@ module.exports = async function (context, req) {
             if (r.status >= 300 && r.status < 400 && loc) {
                 let finalUrl = new URL(loc, currentUrl).toString();
                 finalUrl = finalUrl.replace(/^https:\/\/(www\.)?tute\.ink/, `https://${PANEL}`);
-                context.log(`Server-side Redirect hop ${hop} → ${finalUrl}`);
                 currentUrl = finalUrl;
                 req.method = 'GET';
                 body = undefined;
@@ -76,7 +74,6 @@ module.exports = async function (context, req) {
         let responseBody = await r.text();
         const contentType  = r.headers.get('content-type') || 'text/html';
 
-        // Strip JS redirects just in case
         if (contentType.includes('text/html')) {
             responseBody = responseBody.replace(/<script\b[^>]*>([\s\S]*?)<\/script>/gi, function(match, scriptContent) {
                 if (scriptContent.includes('window.location') || scriptContent.includes('location.href')) {
@@ -95,7 +92,6 @@ module.exports = async function (context, req) {
         const setCookie = r.headers.get('set-cookie');
         if (setCookie) respHeaders['Set-Cookie'] = setCookie;
 
-        // Always return 200 to the browser so it doesn't follow redirects
         context.res = { status: 200, headers: respHeaders, body: responseBody };
     } catch (e) {
         context.log('Error:', e.message);
