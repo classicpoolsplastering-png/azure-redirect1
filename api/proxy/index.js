@@ -12,18 +12,13 @@ module.exports = async function (context, req) {
     // 2. Extract the code
     const parts = path.split('/').filter(Boolean);
     let code = '';
-    let originalRandomString = '';
-
-    if (parts.length === 2 && parts[0] !== 'api' && parts[1].length > 4) {
-        // e.g., /bc29429fe8ed/M7OCTS
-        originalRandomString = parts[0];
-        code = parts[1];
-    } else if (parts.length === 1 && parts[0].length > 4) {
-        // e.g., /api/proxy/M7OCTS
-        code = parts[0];
+    
+    if (parts.length >= 1) {
+        // Grabs the last part of the URL (which is always the code)
+        code = parts[parts.length - 1]; 
     }
 
-    if (!code) {
+    if (!code || code.length < 4) {
         context.res = { status: 400, body: "Invalid link. Missing code." };
         return;
     }
@@ -55,7 +50,7 @@ module.exports = async function (context, req) {
         let currentUrl = `https://${PANEL}${path}`;
         let r;
 
-        // 4. Follow server-side redirects
+        // 4. Follow server-side redirects (302, 301, etc.)
         for (let hop = 0; hop < 5; hop++) {
             r = await fetch(currentUrl, {
                 method: req.method,
