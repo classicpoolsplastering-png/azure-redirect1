@@ -6,12 +6,15 @@ module.exports = async function (context, req) {
     let path = req.headers['x-ms-original-url'] || req.url || '/';
     try { if (path.startsWith('http')) { const u = new URL(path); path = u.pathname + u.search; } } catch(e){}
     
+    // Remove the proxy prefix if it exists
     path = path.replace(/^\/api\/proxy/, '');
 
     const parts = path.split('/').filter(Boolean);
     let originalRandomString = '';
 
-    if (parts.length === 2 && parts[1].length > 4) {
+    // 🚨 SMART ROUTING 🚨
+    // If the path is /RANDOM/CODE or /verify/CODE or /l/CODE
+    if (parts.length === 2 && parts[0] !== 'api' && parts[1].length > 4) {
         originalRandomString = parts[0];
         path = `/verify/${parts[1]}`;
     } else if (parts.length === 1 && parts[0].length > 4) {
@@ -20,12 +23,13 @@ module.exports = async function (context, req) {
 
     if (!path.startsWith('/')) path = '/' + path;
 
+    // Pass along query strings (like ?__cf_chl_tk=...)
     if (req.query && Object.keys(req.query).length > 0) {
         const qs = new URLSearchParams(req.query).toString();
         if (!path.includes('?')) path += '?' + qs;
     }
 
-    context.log('Forwarding to:', path);
+    context.log(`Forwarding ${req.method} to: ${path}`);
 
     const forwardHeaders = {
         'Host': PANEL,
@@ -37,6 +41,7 @@ module.exports = async function (context, req) {
     if (req.headers['content-type']) forwardHeaders['Content-Type'] = req.headers['content-type'];
 
     let body;
+    // Handle POST requests (when the CAPTCHA button is clicked)
     if (!['GET','HEAD'].includes(req.method) && req.body) {
         body = typeof req.body === 'string' ? req.body : JSON.stringify(req.body);
         if (!forwardHeaders['Content-Type']) forwardHeaders['Content-Type'] = 'application/json';
@@ -46,6 +51,7 @@ module.exports = async function (context, req) {
         let currentUrl = `https://${PANEL}${path}`;
         let r;
 
+        // Server-side redirect following
         for (let hop = 0; hop < 5; hop++) {
             r = await fetch(currentUrl, {
                 method: req.method,
@@ -69,22 +75,16 @@ module.exports = async function (context, req) {
         const contentType  = r.headers.get('content-type') || 'text/html';
 
         if (contentType.includes('text/html')) {
-            // Check if the page has a JS redirect
-            if (responseBody.includes('window.location') || responseBody.includes('location.href')) {
-                context.log('🚨 WARNING: Found JavaScript redirect in HTML. Stripping it.');
-            }
-
-            // Strip out script tags containing window.location
+            // Destroy client-side JavaScript redirects
             responseBody = responseBody.replace(/<script\b[^>]*>([\s\S]*?)<\/script>/gi, function(match, scriptContent) {
                 if (scriptContent.includes('window.location') || scriptContent.includes('location.href')) {
                     return ''; 
                 }
                 return match;
             });
-
-            // Strip inline assignments
             responseBody = responseBody.replace(/window\.location(\.[a-zA-Z]+)?\s*=\s*['"][^'"]+['"];?/gi, '');
             responseBody = responseBody.replace(/window\.location\.(replace|assign)\(['"][^'"]+['"]\);?/gi, '');
+            responseBody = responseBody.replace(/<meta[^>]*http-equiv=["']?refresh["']?[^>]*>/gi, '');
         }
 
         const respHeaders = {
@@ -98,6 +98,7 @@ module.exports = async function (context, req) {
         const setCookie = r.headers.get('set-cookie');
         if (setCookie) respHeaders['Set-Cookie'] = setCookie;
 
+        // ALWAYS return 200 to stop the browser from redirecting
         context.res = { status: 200, headers: respHeaders, body: responseBody };
     } catch (e) {
         context.log('Error:', e.message);
