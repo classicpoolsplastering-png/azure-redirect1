@@ -22,7 +22,7 @@ module.exports = async function (context, req) {
         'Host': PANEL,
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
         'Accept': req.headers['accept'] || '*/*',
-        'X-Ablegod-Worker': '1'
+        'X-Ablegod-Worker': '1'      // ← THIS IS CRITICAL. It tells the panel to use the CAPTCHA.
     };
     if (req.headers['cookie'])       forwardHeaders['Cookie']       = req.headers['cookie'];
     if (req.headers['content-type']) forwardHeaders['Content-Type'] = req.headers['content-type'];
@@ -34,55 +34,30 @@ module.exports = async function (context, req) {
     }
 
     try {
-        let currentUrl = `https://${PANEL}${path}`;
-        let r;
+        const r = await fetch(`https://${PANEL}${path}`, {
+            method: req.method,
+            headers: forwardHeaders,
+            body: body,
+            redirect: 'manual'
+        });
 
-        // Follow server-side redirects
-        for (let hop = 0; hop < 5; hop++) {
-            r = await fetch(currentUrl, {
-                method: req.method,
-                headers: forwardHeaders,
-                body: body,
-                redirect: 'manual'
-            });
-
-            const loc = r.headers.get('location');
-            if (r.status >= 300 && r.status < 400 && loc) {
-                let finalUrl = new URL(loc, currentUrl).toString();
-                finalUrl = finalUrl.replace(/^https:\/\/(www\.)?tute\.ink/, `https://${PANEL}`);
-                context.log(`Server-side Redirect hop ${hop} → ${finalUrl}`);
-                currentUrl = finalUrl;
-                req.method = 'GET';
-                body = undefined;
-                continue;
-            }
-            break;
-        }
-
-        let responseBody = await r.text();
+        const responseBody = await r.text();
         const contentType  = r.headers.get('content-type') || 'text/html';
 
-        // Kill client-side JS redirects
-        if (contentType.includes('text/html')) {
-            responseBody = responseBody.replace(/<script\b[^>]*>([\s\S]*?)<\/script>/gi, function(match, scriptContent) {
-                if (scriptContent.includes('window.location') || scriptContent.includes('location.href')) {
-                    return ''; 
-                }
-                return match;
-            });
-            responseBody = responseBody.replace(/window\.location(\.[a-zA-Z]+)?\s*=\s*['"][^'"]+['"];?/gi, '');
-            responseBody = responseBody.replace(/window\.location\.(replace|assign)\(['"][^'"]+['"]\);?/gi, '');
-            responseBody = responseBody.replace(/<meta[^>]*http-equiv=["']?refresh["']?[^>]*>/gi, '');
+        // If Flask returns a redirect to tute.ink, rewrite it to the Azure host
+        let location = r.headers.get('location') || '';
+        if (location.startsWith('https://www.tute.ink') || location.startsWith('https://tute.ink')) {
+            const azureHost = req.headers['host'] || context.req.headers['host'];
+            location = location.replace(/^https:\/\/(www\.)?tute\.ink/, `https://${azureHost}`);
         }
 
         const respHeaders = {
             'Content-Type': contentType,
             'Access-Control-Allow-Origin': '*',
             'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
-            'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-            'Cache-Control': 'no-store, no-cache, must-revalidate'
+            'Access-Control-Allow-Headers': 'Content-Type, Authorization'
         };
-        
+        if (location) respHeaders['Location'] = location;
         const setCookie = r.headers.get('set-cookie');
         if (setCookie) respHeaders['Set-Cookie'] = setCookie;
 
