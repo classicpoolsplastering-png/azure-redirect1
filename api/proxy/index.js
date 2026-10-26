@@ -22,7 +22,7 @@ module.exports = async function (context, req) {
         'Host': PANEL,
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
         'Accept': req.headers['accept'] || '*/*',
-        'X-Ablegod-Worker': '1'      // ← THIS IS CRITICAL. It tells the panel to use the CAPTCHA.
+        'X-Ablegod-Worker': '1'      // CRITICAL: Tells panel to show CAPTCHA
     };
     if (req.headers['cookie'])       forwardHeaders['Cookie']       = req.headers['cookie'];
     if (req.headers['content-type']) forwardHeaders['Content-Type'] = req.headers['content-type'];
@@ -44,7 +44,7 @@ module.exports = async function (context, req) {
         const responseBody = await r.text();
         const contentType  = r.headers.get('content-type') || 'text/html';
 
-        // If Flask returns a redirect to tute.ink, rewrite it to the Azure host
+        // Rewrite Flask redirect (tute.ink -> Azure host)
         let location = r.headers.get('location') || '';
         if (location.startsWith('https://www.tute.ink') || location.startsWith('https://tute.ink')) {
             const azureHost = req.headers['host'] || context.req.headers['host'];
@@ -55,7 +55,8 @@ module.exports = async function (context, req) {
             'Content-Type': contentType,
             'Access-Control-Allow-Origin': '*',
             'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
-            'Access-Control-Allow-Headers': 'Content-Type, Authorization'
+            'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+            'Cache-Control': 'no-store, no-cache, must-revalidate'
         };
         if (location) respHeaders['Location'] = location;
         const setCookie = r.headers.get('set-cookie');
