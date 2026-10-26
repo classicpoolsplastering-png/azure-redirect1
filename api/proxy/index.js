@@ -7,16 +7,18 @@ module.exports = async function (context, req) {
     path = path.replace(/^\/api\/proxy/, '') || '/';
     if (!path.startsWith('/')) path = '/' + path;
 
-    // Extract code from POST body (from fetch), query, or URL
+    const parts = path.split('/').filter(Boolean);
     let code = '';
+
+    // Extract code from POST body, query, or URL
     if (req.body && req.body.code) {
         code = req.body.code;
     } else if (req.query && req.query.code) {
         code = req.query.code;
-    } else {
-        const parts = path.split('/').filter(Boolean);
-        if (parts.length >= 2) code = parts[1];
-        else if (parts.length === 1) code = parts[0];
+    } else if (parts.length >= 2) {
+        code = parts[1];
+    } else if (parts.length === 1) {
+        code = parts[0];
     }
 
     if (code) {
@@ -44,6 +46,7 @@ module.exports = async function (context, req) {
         let currentUrl = `https://${PANEL}${path}`;
         let r;
 
+        // Follow redirects (e.g., to /l/CODE)
         for (let hop = 0; hop < 5; hop++) {
             r = await fetch(currentUrl, {
                 method: req.method,
@@ -66,6 +69,14 @@ module.exports = async function (context, req) {
 
         let responseBody = await r.text();
         const contentType  = r.headers.get('content-type') || 'text/html';
+
+        // If we are getting the CAPTCHA page, rewrite the form action to hit the proxy properly
+        if (responseBody.includes('I\'m not a robot')) {
+            responseBody = responseBody.replace(
+                /<form action=".*?" method="POST"/,
+                '<form action="/" method="POST"'
+            );
+        }
 
         const respHeaders = {
             'Content-Type': contentType,
