@@ -8,15 +8,13 @@ module.exports = async function (context, req) {
     path = path.replace(/^\/api\/proxy/, '');
     
     // 🚨 SMART ROUTING 🚨
-    // Check if the URL looks like /randomstring/CODE
-    // We split by '/' and if we have 2 parts, the second is the code.
     const parts = path.split('/').filter(Boolean);
+    let originalRandomString = '';
     
     if (parts.length === 2 && parts[1].length > 4) {
-        // If it's a 2-part path (like /78fgfdre5678/H4VNFV), rewrite to /verify/CODE
+        originalRandomString = parts[0]; // Save the random string
         path = `/verify/${parts[1]}`;
     } else if (parts.length === 1 && parts[0].length > 4) {
-        // If it's just /CODE, rewrite to /verify/CODE
         path = `/verify/${parts[0]}`;
     }
 
@@ -25,11 +23,6 @@ module.exports = async function (context, req) {
     if (req.query && Object.keys(req.query).length > 0) {
         const qs = new URLSearchParams(req.query).toString();
         if (!path.includes('?')) path += '?' + qs;
-    }
-
-    if (path.startsWith('/cdn-cgi/')) {
-        context.res = { status: 404, body: '' };
-        return;
     }
 
     context.log('Forwarding to:', path);
@@ -60,10 +53,17 @@ module.exports = async function (context, req) {
         const responseBody = await r.text();
         const contentType  = r.headers.get('content-type') || 'text/html';
 
+        // 🚨 REWRITE REDIRECTS TO STAY ON THE RANDOM STRING 🚨
         let location = r.headers.get('location') || '';
         if (location.startsWith(`https://${PANEL}`) || location.startsWith(`https://www.${PANEL}`)) {
-            const azureHost = req.headers['host'] || context.req.headers['host'];
-            location = location.replace(/^https:\/\/(www\.)?tute\.ink/, `https://${azureHost}`);
+            // If the panel redirects to /l/CODE, rewrite it to /RANDOMSTRING/CODE
+            if (location.includes('/l/') && originalRandomString) {
+                const code = location.split('/l/')[1];
+                location = `/${originalRandomString}/${code}`;
+            } else {
+                const azureHost = req.headers['host'] || context.req.headers['host'];
+                location = location.replace(/^https:\/\/(www\.)?tute\.ink/, `https://${azureHost}`);
+            }
         }
 
         const respHeaders = {
