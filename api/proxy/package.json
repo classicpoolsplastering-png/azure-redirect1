@@ -1,10 +1,5 @@
 {
   "name": "azure-proxy",
   "version": "1.0.0",
-  "description": "",
-  "main": "proxy/index.js",
-  "scripts": {
-    "start": "func start"
-  },
-  "dependencies": {}
+  "main": "proxy/index.js"
 }
