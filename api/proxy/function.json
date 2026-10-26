@@ -5,8 +5,14 @@
       "type": "httpTrigger",
       "direction": "in",
       "name": "req",
-      "methods": ["get", "post", "put", "delete", "options"],
-      "route": "{*path}"
+      "methods": [
+        "get",
+        "post",
+        "put",
+        "delete",
+        "head",
+        "options"
+      ]
     },
     {
       "type": "http",
