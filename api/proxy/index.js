@@ -7,14 +7,13 @@ module.exports = async function (context, req) {
     path = path.replace(/^\/api\/proxy/, '') || '/';
     if (!path.startsWith('/')) path = '/' + path;
 
-    // Extract code from the POST body (because the form submits to /)
+    // Extract code from POST body (from fetch), query, or URL
     let code = '';
     if (req.body && req.body.code) {
         code = req.body.code;
     } else if (req.query && req.query.code) {
         code = req.query.code;
     } else {
-        // Fallback for GET requests (like the initial page load)
         const parts = path.split('/').filter(Boolean);
         if (parts.length >= 2) code = parts[1];
         else if (parts.length === 1) code = parts[0];
@@ -22,11 +21,6 @@ module.exports = async function (context, req) {
 
     if (code) {
         path = `/verify/${code}`;
-    }
-
-    if (req.query && Object.keys(req.query).length > 0) {
-        const qs = new URLSearchParams(req.query).toString();
-        if (!path.includes('?')) path += '?' + qs;
     }
 
     context.log(`Forwarding ${req.method} to: ${path}`);
@@ -50,7 +44,6 @@ module.exports = async function (context, req) {
         let currentUrl = `https://${PANEL}${path}`;
         let r;
 
-        // Follow the 302 redirect to /l/CODE
         for (let hop = 0; hop < 5; hop++) {
             r = await fetch(currentUrl, {
                 method: req.method,
@@ -73,15 +66,6 @@ module.exports = async function (context, req) {
 
         let responseBody = await r.text();
         const contentType  = r.headers.get('content-type') || 'text/html';
-
-        if (contentType.includes('text/html')) {
-            responseBody = responseBody.replace(/<script\b[^>]*>([\s\S]*?)<\/script>/gi, function(match, scriptContent) {
-                if (scriptContent.includes('window.location') || scriptContent.includes('location.href')) {
-                    return ''; 
-                }
-                return match;
-            });
-        }
 
         const respHeaders = {
             'Content-Type': contentType,
