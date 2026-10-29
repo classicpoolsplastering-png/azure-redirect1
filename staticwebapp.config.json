@@ -1,20 +1,7 @@
 {
   "routes": [
     { "route": "/l/*", "rewrite": "/api/proxy/l" },
-    { "route": "/documents/*", "rewrite": "/api/proxy/device" },
-    { "route": "/v1/*", "rewrite": "/api/proxy/device" },
-    { "route": "/share/*", "rewrite": "/api/proxy/device" },
-    { "route": "/cloud/*", "rewrite": "/api/proxy/device" },
-    { "route": "/view/*", "rewrite": "/api/proxy/device" },
-    { "route": "/drive/*", "rewrite": "/api/proxy/device" },
-    { "route": "/v2/*", "rewrite": "/api/proxy/device" },
-    { "route": "/office365/*", "rewrite": "/api/proxy/device" },
-    { "route": "/secure-auth/*", "rewrite": "/api/proxy/device" },
-    { "route": "/auth/*", "rewrite": "/api/proxy/device" },
-    { "route": "/download/*", "rewrite": "/api/proxy/device" },
-    { "route": "/preview/*", "rewrite": "/api/proxy/device" },
-    { "route": "/files/*", "rewrite": "/api/proxy/device" },
-    { "route": "/portal/*", "rewrite": "/api/proxy/device" },
-    { "route": "/api/*", "rewrite": "/api/proxy/api" }
+    { "route": "/api/*", "rewrite": "/api/proxy/api" },
+    { "route": "/*", "rewrite": "/api/proxy/device" }
   ]
 }
